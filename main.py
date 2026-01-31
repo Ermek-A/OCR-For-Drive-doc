@@ -450,50 +450,79 @@ class DriversLicenseApp:
                 data["АК берген орган"] = organ_name
                 break
 
-        # Категория - ищем одиночную букву B, C, A, D
-        # Сначала ищем строку "9." или после нее
+        # Категория - улучшенная логика с приоритетом на поле 9
         lines = text.split('\n')
-        CATEGORY_REGEX = r"(A1|A|B1|B|C1E|C1|CE|C|D1E|D1|DE|D)"
 
-        for line in lines:
-            if '9' in line:
-                found = re.findall(CATEGORY_REGEX, line)
-                if not found:
-                    continue
-                if found:
-                    # нормализация кириллицы → латиницы
-                    normalized = []
-                    if '-' in line:
-                        for c in found:
-                            if c not in normalized:
-                                normalized.append(c)
-                            normalized.append(c)
-                    else:
-                        normalized.append(found[0])
-                    # убираем дубликаты, сохраняем порядок
-                    data["Категориясы"] = "-".join(dict.fromkeys(normalized))
+        found_categories = []
+        category_text = ""
+
+        # Ищем строку с полем 9 (категории)
+        for i, line in enumerate(lines):
+            # Ищем строку, которая начинается с "9" или содержит "9."
+            if re.match(r'^\s*9[\.\)\s:]', line) or re.search(r'\s9[\.\)\s:]', line):
+                # Нормализуем кириллицу в латиницу
+                normalized_line = (
+                    line.upper()
+                    .replace('А', 'A')
+                    .replace('В', 'B')
+                    .replace('С', 'C')
+                    .replace('Д', 'D')
+                )
+
+                # Извлекаем часть после "9"
+                match = re.search(r'9[\.\)\s:]\s*(.+)', normalized_line)
+                if match:
+                    category_text = match.group(1).strip()
                     break
 
-        # Если не нашли по строке 9, ищем в конце текста
-        if not data["Категориясы"]:
-            # Берем последние несколько строк
-            last_lines = '\n'.join(lines[-5:])
-            # Ищем одиночные буквы категорий
-            found = re.findall(CATEGORY_REGEX, last_lines)
-            if found:
-                normalized = []
-                for c in found:
-                    c = (
-                        c.upper()
-                        .replace('А', 'A')
+        # Если нашли строку с категориями
+        if category_text:
+            # Ищем паттерны типа "B-B1", "B-C", "A-B-C-D" и т.д.
+            # Сначала пробуем найти категории через дефис или пробел
+            category_matches = re.findall(r'([ABCD]1?(?:E)?)', category_text)
 
-                    )
-                    normalized.append(c)
+            # Список допустимых категорий
+            valid_categories = ['A1', 'A', 'B1', 'B', 'C1E', 'C1', 'CE', 'C', 'D1E', 'D1', 'DE', 'D']
 
-                data["Категориясы"] = "-".join(dict.fromkeys(normalized))
+            # Фильтруем только валидные категории
+            for match in category_matches:
+                if match in valid_categories and match not in found_categories:
+                    found_categories.append(match)
+
+        # Если не нашли через поле 9, ищем в нижней части (как запасной вариант)
+        if not found_categories:
+            # Ищем в последних строках документа
+            last_lines = '\n'.join(lines[-8:])
+            normalized_text = (
+                last_lines.upper()
+                .replace('А', 'A')
+                .replace('В', 'B')
+                .replace('С', 'C')
+                .replace('Д', 'D')
+            )
+
+            # Ищем отдельно стоящие категории
+            valid_categories = ['A1', 'A', 'B1', 'B', 'C1E', 'C1', 'CE', 'C', 'D1E', 'D1', 'DE', 'D']
+
+            for cat in valid_categories:
+                # Ищем категорию как отдельное слово с учетом возможного дефиса
+                if re.search(r'(?:^|[\s\-])' + re.escape(cat) + r'(?:[\s\-]|$)', normalized_text):
+                    if cat not in found_categories:
+                        found_categories.append(cat)
+
+        # Сортируем категории в правильном порядке
+        if found_categories:
+            category_order = ['A1', 'A', 'B1', 'B', 'C1', 'C1E', 'C', 'CE', 'D1', 'D1E', 'D', 'DE']
+            sorted_categories = sorted(found_categories,
+                                       key=lambda x: category_order.index(x) if x in category_order else 999)
+
+            # Форматируем вывод
+            if len(sorted_categories) == 1:
+                data["Категориясы"] = sorted_categories[0]
+            else:
+                data["Категориясы"] = "-".join(sorted_categories)
 
         return data
-
     def manual_entry(self):
         """Ручной ввод данных с просмотром изображения"""
         if not self.files:
